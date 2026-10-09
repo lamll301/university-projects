@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Lọc ảnh trong miền tần số</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <h2>Lọc ảnh trong miền tần số</h2>
+    <div class="flex options">
+        <p>Chọn phép lọc:</p>
+        <div>
+            <select id="imgFiltering">
+                <option id="lowPass">Lọc thông thấp</option>
+                <option id="highPass">Lọc thông cao</option>
+                <option id="bandPass">Lọc dải thông</option>
+                <option id="bandStop">Lọc chặn dải thông</option>
+                <option id="laplacian">Lọc bằng toán tử Laplacian</option>
+                <option id="homomorphic">Lọc đồng hình</option>
+            </select>
+        </div>
+    </div>
+    <div class="flex options">
+        <p>Chọn bộ lọc:</p>
+        <div>
+            <select id="filter">
+                <option id="ideal">Bộ lọc Ideal</option>
+                <option id="butterworth">Bộ lọc Butterworth</option>
+                <option id="gaussian">Bộ lọc Gaussian</option>
+            </select>
+        </div>
+        <p class="ml-20">Nhập D0:</p>
+        <input type="number" id="D0" name="D0">
+        <p class="ml-20">Nhập D1:</p>
+        <input type="number" id="D1" name="D1">
+        <!-- <p class="ml-20">Nhập yLow:</p>
+        <input type="number" id="ylow" name="ylow">
+        <p class="ml-20">Nhập yHigh:</p>
+        <input type="number" id="yhigh" name="yhigh"> -->
+        <button class="ml-20" id="btn">Xác nhận</button>
+    </div>
+    <div class="flex options">
+        <p>Chọn ảnh kết quả sau khi lọc:</p>
+        <div>
+            <select id="type">
+                <option id="grayImg">Ảnh xám</option>
+                <option id="colorImg">Ảnh màu</option>
+            </select>
+        </div>
+    </div>
+    <div class="container flex">
+        <div class="container-inputoutput">
+            <div class="inputoutput">
+                <img id="imageSrc" alt="No Image" />
+                <div class="caption">imageSrc <input type="file" id="fileInput" name="file" /></div>
+            </div>
+            <div class="inputoutput mt-8">
+                <canvas id="canvasOutput" class="image"></canvas>
+                <div class="caption">Output <button id="downloadBtn">Download</button></div>
+            </div>
+            <div id="laplacianEnhanceImage" class="inputoutput mt-8">
+                <canvas id="canvasLapEnhanceImg" class="image"></canvas>
+                <div class="caption">Ảnh sau khi được cải thiện</div>
+            </div>
+        </div>
+        <div class="inputoutput">
+            <canvas id="canvasKernel" class="image"></canvas>
+            <div class="caption">Kernel</div>
+        </div>
+    </div>
+    <script type="text/javascript">
+        let imgElement = document.getElementById('imageSrc');
+        let inputElement = document.getElementById('fileInput');
+        // Hiển thị hình ảnh gốc
+        inputElement.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            const img = new Image();
+            img.onload = function() {
+                const resizedCanvas = resizeImage(img);
+                imgElement.src = resizedCanvas.toDataURL();
+            };
+            img.src = URL.createObjectURL(file);
+        }, false);
+        // Click vào nút download
+        document.getElementById("downloadBtn").addEventListener("click", function() {
+            const canvas = document.getElementById("canvasOutput");
+            const context = canvas.getContext('2d');
+            const canvasData = context.getImageData(0, 0, canvas.width, canvas.height).data;
+            const isEmpty = !canvasData.some(color => color !== 0);
+            if (!isEmpty) {
+                const link = document.createElement("a");
+                const originalFileName = inputElement.files[0].name.replace(/\.[^/.]+$/, "");
+                link.download = originalFileName + "_processed.png";
+                link.href = canvas.toDataURL();
+                link.click();
+            }
+        });
+        // Bắt sự kiện khi click vào nút xác nhận
+        document.getElementById("btn").addEventListener("click", function() {
+            let D0 = document.getElementById("D0").value;
+            let D1 = document.getElementById("D1").value;
+            let imgFiltering = document.getElementById("imgFiltering");
+            let filter = document.getElementById("filter");
+            let type = document.getElementById("type");
+            let laplacianEnhanceImage = document.getElementById("laplacianEnhanceImage");
+            // let ylow = document.getElementById("ylow").value;
+            // let yhigh = document.getElementById("yhigh").value;
+            let selectedImgFilteringId = imgFiltering.options[imgFiltering.selectedIndex].id;
+            let selectedFilterId = filter.options[filter.selectedIndex].id;
+            let selectedTypeId = type.options[type.selectedIndex].id;
+            let grayscaleImage, H, paddedImage, paddedImageG, paddedImageB;
+
+            const mat = cv.imread(imgElement);
+            if (selectedTypeId === "colorImg" && isGrayScaleImage(mat) || selectedImgFilteringId === "laplacian") {
+                selectedTypeId = "grayImg";
+                console.log("Đây là ảnh xám.")
+            } else {
+                console.log("Đây là ảnh màu.")
+            }
+            if (selectedTypeId === "grayImg") {
+                const grayscaleMat = new cv.Mat();
+                cv.cvtColor(mat, grayscaleMat, cv.COLOR_RGBA2GRAY);
+                grayscaleImage = nj.array(grayscaleMat.data, 'uint8').reshape(grayscaleMat.rows, grayscaleMat.cols);
+                paddedImage = padded_image(grayscaleImage);
+                // cleanup
+                grayscaleMat.delete();
+            }
+            else if (selectedTypeId === "colorImg") {
+                let channels = new cv.MatVector();
+                cv.split(mat, channels);
+                let rMat = channels.get(0);
+                let gMat = channels.get(1);
+                let bMat = channels.get(2);
+                let R = nj.array(rMat.data, 'uint8').reshape(rMat.rows, rMat.cols);
+                let G = nj.array(gMat.data, 'uint8').reshape(gMat.rows, gMat.cols);
+                let B = nj.array(bMat.data, 'uint8').reshape(bMat.rows, bMat.cols);
+                paddedImage = padded_image(R);
+                paddedImageG = padded_image(G);
+                paddedImageB = padded_image(B);
+                // cleanup
+                channels.delete();
+                rMat.delete();
+                gMat.delete();
+                bMat.delete();
+            }
+            // Tính nhân H
+            switch(selectedImgFilteringId) {
+                case "lowPass":
+                    switch(selectedFilterId) {
+                        case "ideal":
+                            H = ilpf(paddedImage, parseInt(D0));
+                            break;
+                        case "butterworth":
+                            H = blpf(paddedImage, parseInt(D0), 2);
+                            break;
+                        case "gaussian":
+                            H = glpf(paddedImage, parseInt(D0));
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                case "highPass":
+                    switch(selectedFilterId) {
+                        case "ideal":
+                            H = ihpf(paddedImage, parseInt(D0));
+                            break;
+                        case "butterworth":
+                            H = bhpf(paddedImage, parseInt(D0), 2);
+                            break;
+                        case "gaussian":
+                            H = ghpf(paddedImage, parseInt(D0));
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                case "bandPass":
+                    switch(selectedFilterId) {
+                        case "ideal":
+                            H = ibpf(paddedImage, parseInt(D0), parseInt(D1));
+                            break;
+                        case "butterworth":
+                            H = bbpf(paddedImage, parseInt(D0), parseInt(D1), 2);
+                            break;
+                        case "gaussian":
+                            H = gbpf(paddedImage, parseInt(D0), parseInt(D1));
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                case "bandStop":
+                    switch(selectedFilterId) {
+                        case "ideal":
+                            H = ibsf(paddedImage, parseInt(D0), parseInt(D1));
+                            break;
+                        case "butterworth":
+                            H = bbsf(paddedImage, parseInt(D0), parseInt(D1), 2);
+                            break;
+                        case "gaussian":
+                            H = gbsf(paddedImage, parseInt(D0), parseInt(D1));
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                case "laplacian":
+                    H = laplacian(paddedImage);
+                    break;
+                case "homomorphic":
+                    // H = homomorphic(paddedImage, parseFloat(ylow), parseFloat(yhigh), parseInt(D0));
+                    H = homomorphic(paddedImage);
+                    break;
+                default:
+                    break;
+            }
+            // xử lý ảnh trước fft
+            let kernel, lapEnhanceImg, lapEnhanceImgData, lapEnhanceImgMat;
+            if (selectedImgFilteringId !== "laplacian") {
+                kernel = show_filter(H);
+                laplacianEnhanceImage.style.display = "none";
+            }
+            if (selectedImgFilteringId === "homomorphic") {
+                paddedImage = homoProcessInputImg(paddedImage);
+            }
+            // thực hiện g * h
+            let filteredImage = apply_filter(paddedImage, H);
+            let filteredImageG, filteredImageB;
+            if (selectedTypeId === "colorImg") {
+                filteredImageG = apply_filter(paddedImageG, H);
+                filteredImageB = apply_filter(paddedImageB, H);
+            }
+            // xử lý ảnh sau ifft
+            if (selectedImgFilteringId === "lowPass" || selectedImgFilteringId === "bandStop") {
+                filteredImage = increase_brightness(filteredImage);
+            }
+            else if (selectedImgFilteringId === "laplacian") {
+                kernel = showLaplacianFilter(H);
+                filteredImage = laplacianImage(filteredImage);
+                lapEnhanceImg = funclaplacianEnhanceImage(grayscaleImage, filteredImage);
+                laplacianEnhanceImage.style.display = "block";
+
+                lapEnhanceImgData = new Uint8Array(lapEnhanceImg.tolist().flat());
+                lapEnhanceImgMat = new cv.Mat(lapEnhanceImg.shape[0], lapEnhanceImg.shape[1], cv.CV_8UC1);
+                lapEnhanceImgMat.data.set(lapEnhanceImgData);
+                cv.imshow(canvasLapEnhanceImg, lapEnhanceImgMat);
+            }
+            else if (selectedImgFilteringId === "homomorphic") {
+                filteredImage = homoProcessOutputImg(filteredImage);
+            }
+            let data, paddedMat;
+            if (selectedTypeId === "colorImg") {
+                let rows = filteredImage.tolist().length;
+                let cols = filteredImage.tolist()[0].length;
+                let filteredImageRMat = cv.matFromArray(rows, cols, cv.CV_8UC1, [].concat(...filteredImage.tolist()));
+                let filteredImageGMat = cv.matFromArray(rows, cols, cv.CV_8UC1, [].concat(...filteredImageG.tolist()));
+                let filteredImageBMat = cv.matFromArray(rows, cols, cv.CV_8UC1, [].concat(...filteredImageB.tolist()));
+                
+                let matVector = new cv.MatVector();
+                matVector.push_back(filteredImageRMat);
+                matVector.push_back(filteredImageGMat);
+                matVector.push_back(filteredImageBMat);
+                let mergedImage = new cv.Mat();
+                cv.merge(matVector, mergedImage);
+                matVector.delete();
+                filteredImageRMat.delete();
+                filteredImageGMat.delete();
+                filteredImageBMat.delete();
+                data = new Uint8Array(mergedImage.data);
+                paddedMat = new cv.Mat(mergedImage.rows, mergedImage.cols, cv.CV_8UC3);
+                mergedImage.delete();
+            }
+            else {
+                data = new Uint8Array(filteredImage.tolist().flat());
+                paddedMat = new cv.Mat(filteredImage.shape[0], filteredImage.shape[1], cv.CV_8UC1);
+            }
+            const kernelData = new Uint8Array(kernel.tolist().flat());
+            const kernelMat = new cv.Mat(kernel.shape[0], kernel.shape[1], cv.CV_8UC1);
+             
+            kernelMat.data.set(kernelData);
+            paddedMat.data.set(data);
+
+            cv.imshow(canvasKernel, kernelMat);
+            cv.imshow(canvasOutput, paddedMat);
+            // cleanup
+            kernelMat.delete();
+            paddedMat.delete();
+            mat.delete();
+        });
+    </script>
+    <script async src="opencv.js" type="text/javascript"></script>
+    <script src="numjs.js"></script>
+    <script src="imageProcessing.js"></script>
+</body>
+
+</html>

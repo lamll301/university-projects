@@ -1,0 +1,26 @@
+
+#laplacianEnhanceImage {
+    display: none;
+}
+.container-inputoutput {
+    margin-right: 16px;
+}
+.options {
+    align-items: center;
+}
+.options p {
+    margin-right: 12px;
+}
+.image {
+    border: 1px solid #000;
+}
+
+.flex {
+    display: flex !important;
+}
+.ml-20 {
+    margin-left: 20px !important;
+}
+.mt-8 {
+    margin-top: 8px !important;
+}
